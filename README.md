@@ -3,6 +3,78 @@
 RTX 4070 Ti SUPER (16GB VRAM) / Windows 11 / Python 3.12 向けの
 アニメキャラ絵量産構成。
 
+## 初回セットアップ（Windows / PowerShell）
+
+Git、Python 3.12（64 ビット）、CUDA 12.8 に対応する NVIDIA ドライバーを用意する。
+起動・停止スクリプトは `F:\ai-image` を参照するため、このリポジトリをそこに配置して PowerShell を開く。
+
+### 1. 仮想環境と ComfyUI を用意する
+
+```powershell
+Set-Location F:\ai-image
+py -3.12 -m venv venv
+$venvPython = '.\venv\Scripts\python.exe'
+& $venvPython -m pip install --upgrade pip
+
+git clone https://github.com/Comfy-Org/ComfyUI.git ComfyUI
+git -C ComfyUI checkout --detach 19ae172bff6c9e4c738e7f2e00fe087f5b5b46ab
+& $venvPython -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128
+& $venvPython -m pip install -r .\ComfyUI\requirements.txt
+& $venvPython -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+```
+
+最後の出力が `2.11.0+cu128 12.8 True` なら PyTorch から GPU を利用できる。
+以降も `venv\Scripts\python.exe` を直接呼び出せるので、仮想環境の有効化は不要。
+[PyTorch のバージョン別インストール手順](https://pytorch.org/get-started/previous-versions/)
+
+### 2. モデルを配置して起動する
+
+```powershell
+New-Item -ItemType Directory -Force -Path '.\input', '.\output\raw', '.\models\checkpoints', '.\models\loras' | Out-Null
+Copy-Item .\extra_model_paths.yaml.example .\ComfyUI\extra_model_paths.yaml
+```
+
+ベースモデル `waiIllustriousSDXL_v170.safetensors` を `models\checkpoints\` に置く。
+ダウンロードには [モデルの追加](#1-モデルの追加) の `get-model.ps1` を使える。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-comfyui.ps1
+```
+
+起動したらブラウザで <http://127.0.0.1:8188> を開く。起動用の PowerShell を開いたまま、別の PowerShell で次の手順を実行する。
+
+### 3. CSV を用意して1枚生成する
+
+プロンプトの実データは各自で用意する。次の例ではテンプレートのヘッダーからテスト用 CSV を作り、基本ワークフローで試す。
+
+```powershell
+Set-Location F:\ai-image
+$testCsv = '.\prompts\setup_test.csv'
+if (-not (Test-Path -LiteralPath $testCsv)) {
+    Copy-Item .\prompts\prompts.csv.example $testCsv
+    Add-Content -LiteralPath $testCsv -Encoding utf8 '001,"anime illustration, mountain landscape, morning light","blurry, low quality",1024,1024,28,5.5,euler_ancestral,normal,1,setup test'
+}
+.\venv\Scripts\python.exe scripts\generate_images.py --prompts $testCsv --limit 1 --dry-run
+.\venv\Scripts\python.exe scripts\generate_images.py --prompts $testCsv --limit 1
+```
+
+1つ目のコマンドで生成条件を確認し、2つ目のコマンドで画像を `output\raw\` に保存する。
+
+### Dreamwash + anmi とスタイル参照を使う場合
+
+下の量産例には `Dreamwash.safetensors` と `anmi.safetensors` を `models\loras\` に配置し、コマンドで指定する CSV を `prompts\` に用意する。
+参照画像を使う場合は、ComfyUI を起動する前に次のカスタムノードとモデルを配置する。
+
+```powershell
+git clone https://github.com/cubiq/ComfyUI_IPAdapter_plus.git .\ComfyUI\custom_nodes\ComfyUI_IPAdapter_plus
+git -C .\ComfyUI\custom_nodes\ComfyUI_IPAdapter_plus checkout --detach a0f451a5113cf9becb0847b92884cb10cbdec0ef
+```
+
+- `ComfyUI\models\clip_vision\CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors`
+- `ComfyUI\models\ipadapter\ip-adapter-plus_sdxl_vit-h.safetensors`
+
+参照画像は `input\style_reference\` に置く。モデルの入手先とファイル名は [ComfyUI IPAdapter Plus の導入手順](https://github.com/cubiq/ComfyUI_IPAdapter_plus#installation) を参照。
+
 ## 好みの絵柄を比較する
 
 普段の WAI v17 + Dreamwash + anmi ワークフローは、`input/style_reference` 直下の
@@ -23,6 +95,17 @@ RTX 4070 Ti SUPER (16GB VRAM) / Windows 11 / Python 3.12 向けの
   --common-positive prompts\common_positive_dreamwash_anmi.txt `
   --common-negative prompts\common_negative_mixed.txt `
   --batch 1 --seed -1 --prefix "dreamwash_anmi/$(Get-Date -Format 'yyyyMMdd_HHmmss')/img"
+```
+
+冬服版のプロンプトで量産する場合は、ローカルの `prompts_combined_1920_v5_reference_character_winter_v3.csv` を `prompts/` に置いて実行する。
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py `
+   --workflow workflows\sdxl_dreamwash_anmi_api.json `
+   --prompts .\prompts\prompts_combined_1920_v5_reference_character_winter_v3.csv `
+   --common-positive prompts\common_positive_dreamwash_anmi.txt `
+   --common-negative prompts\common_negative_mixed.txt `
+   --batch 1 --seed -1 --prefix "dreamwash_anmi/$(Get-Date -Format 'yyyyMMdd_HHmmss')/img"
 ```
 
 `generate_images.py` は画像のファイル名にコマンド実行日時を
