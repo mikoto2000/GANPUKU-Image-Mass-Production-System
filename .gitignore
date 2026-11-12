@@ -1,0 +1,24 @@
+# Local dependencies, data, and application state
+/ComfyUI/
+/venv/
+/models/
+/input/
+/output/
+/logs/
+/favorites/
+/.rei/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Python caches and temporary scripts
+__pycache__/
+*.pyc
+/_rei_tmp_*
+/_probe_csv_check.py
+
+# Prompt backups
+/prompts/*.bak*

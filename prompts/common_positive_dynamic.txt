@@ -1,0 +1,39 @@
+# ダイナミックポーズ用の共通ポジティブプロンプト
+# common_positive.txt との違い:
+#   - big face を外した（full body と正面から衝突するため）
+#   - 動きと布の流れを補強するタグを追加
+# 1 行 1 タグ。空行と # 行は無視される。
+(loli:2.0)
+masterpiece
+best quality
+(full color:1.2)
+finished anime illustration
+modern anime style
+light novel cover
+soft digital painting
+smooth gradient shading
+feathered shading
+soft blended gradients
+feathered color transitions
+detailed hair strands
+fine hair strands
+loose strands
+shiny hair
+detailed clothing
+clothing folds
+fabric texture
+light color palette
+pastel colors
+bright high-key lighting
+soft shadows
+cool color shadows
+blue-gray shadows
+(delicate light-colored outlines:1.2)
+(simple background:1.2)
+plain white background
+clean composition
+negative space
+minimal decoration
+dynamic composition
+sense of motion
+flowing fabric

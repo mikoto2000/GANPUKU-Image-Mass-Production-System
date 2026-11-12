@@ -1,0 +1,102 @@
+# 静的・動的ポーズ混在版の共通ネガティブプロンプト
+# common_negative.txt との違い:
+#   - arms at sides を外した（静的プールに「腕を下ろす」ポーズがあるため）
+#   - curly hair を外した（動的プールにカーリーヘアがあるため）
+#   - standing still / static pose / cropped legs は入れない（静的・upper body と衝突するため）
+# 1 行 1 タグ。空行と # 行は無視される。
+bad quality
+worst quality
+worst detail
+sketch
+censor
+jpeg artifacts
+signature
+watermark
+username
+blurry
+lowres
+bad anatomy
+bad hands
+extra digits
+fewer digits
+missing fingers
+expressionless
+blank stare
+dead eyes
+emotionless
+serious
+frown
+scowl
+straight-on
+stiff pose
+t-pose
+photorealistic
+3d
+cgi
+render
+photo
+oil painting
+impasto
+gouache
+acrylic (medium)
+thick lineart
+bold outlines
+heavy shading
+saturated colors
+high contrast
+rough lineart
+messy lineart
+sepia
+monochrome
+greyscale
+ink
+pen (medium)
+hatching
+crosshatching
+ornament
+floral pattern
+decorative
+border
+frame
+detailed background
+scenery
+lineart
+brown tint
+grayscale
+limited palette
+ink drawing
+pen drawing
+thick outlines
+heavy black shadows
+traditional media
+watercolor painting
+art nouveau
+ornate
+decorative frame
+floral ornament
+swirling patterns
+intricate background
+(gradient hair:1.4)
+(multicolored hair:1.3)
+(latex:1.3)
+(vinyl:1.2)
+(sparkles:1.3)
+hard shadow edges
+cel shading
+(colored inner hair:1.3)
+star-shaped pupils
+symbol-shaped pupils
+water droplets
+wet skin
+wet hair
+wet clothes
+sweat
+see-through clothes
+transparent clothes
+text
+logo
+title
+(blue skin:1.3)
+(purple skin:1.3)
+(colored skin:1.2)
+vivid colors

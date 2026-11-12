@@ -1,0 +1,9 @@
+# Copy to ComfyUI/extra_model_paths.yaml and adjust base_path for your installation.
+ai_image:
+    base_path: F:/ai-image
+    checkpoints: models/checkpoints
+    loras: models/loras
+    vae: models/vae
+    controlnet: models/controlnet
+    upscale_models: models/upscale_models
+    embeddings: models/embeddings
