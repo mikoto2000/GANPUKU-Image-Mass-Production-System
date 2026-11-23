@@ -135,7 +135,7 @@
       "model": ["20", 0],
       "ipadapter": ["20", 1],
       "image": ["21", 0],
-      "weight": 0.20,
+      "weight": 0.30,
       "weight_type": "style transfer",
       "combine_embeds": "concat",
       "start_at": 0.0,

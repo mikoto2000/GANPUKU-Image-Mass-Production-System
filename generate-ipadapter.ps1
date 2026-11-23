@@ -75,9 +75,9 @@ param(
     [ValidateRange(0.0, 1.0)]
     [double]$EndAt = 1.0,
 
-    # Prompt CSV. Relative paths resolve from the project root.
+    # Prompt CSV files. Relative paths resolve from the project root.
     [ValidateNotNullOrEmpty()]
-    [string]$Csv = 'prompts\prompts.csv',
+    [string[]]$Csv = 'prompts\prompts.csv',
 
     # SaveImage filename prefix.
     [ValidateNotNullOrEmpty()]
@@ -121,7 +121,7 @@ function Resolve-ProjectPath {
 }
 
 $refPath = Resolve-ProjectPath $RefImage
-$csvPath = Resolve-ProjectPath $Csv
+$csvPaths = @(foreach ($path in $Csv) { Resolve-ProjectPath $path })
 
 # --- Preconditions ---------------------------------------------------------
 
@@ -137,8 +137,10 @@ if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $refPath -PathType Leaf)) {
     throw ('reference image not found: ' + $refPath)
 }
-if (-not (Test-Path -LiteralPath $csvPath -PathType Leaf)) {
-    throw ('prompt CSV not found: ' + $csvPath)
+foreach ($path in $csvPaths) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw ('prompt CSV not found: ' + $path)
+    }
 }
 if ($StartAt -ge $EndAt) {
     throw ('-StartAt must be smaller than -EndAt (got ' + $StartAt + ' >= ' + $EndAt + ').')
@@ -195,7 +197,8 @@ $inv = [System.Globalization.CultureInfo]::InvariantCulture
 $genArgs = @(
     $generator,
     '--workflow', $workflowPath,
-    '--prompts', $csvPath,
+    '--prompts'
+) + $csvPaths + @(
     '--ref-image', $refPath,
     '--ipadapter-weight', $Weight.ToString($inv),
     '--ipadapter-weight-type', $WeightType,
@@ -217,7 +220,7 @@ Write-Output 'IP-Adapter settings:'
 Write-Output ('  reference : ' + $refPath)
 Write-Output ('  weight    : ' + $Weight.ToString($inv) + ' (' + $WeightType + ')')
 Write-Output ('  range     : ' + $StartAt.ToString($inv) + ' - ' + $EndAt.ToString($inv))
-Write-Output ('  prompts   : ' + $csvPath)
+Write-Output ('  prompts   : ' + ($csvPaths -join ', '))
 Write-Output ('  rows      : start=' + $Start + ' limit=' + $(if ($Limit -gt 0) { $Limit } else { 'all' }) + ' batch=' + $Count)
 Write-Output ('  seed      : ' + $(if ($Seed -ge 0) { $Seed } else { 'random' }))
 Write-Output ('  prefix    : ' + $Prefix)

@@ -2,7 +2,8 @@
 param(
     [ValidateNotNullOrEmpty()]
     [string[]]$RefImage = @('input\HWAC6ZqasAAkFhT.jpg'),
-    [string]$Csv = 'prompts\prompts.csv',
+    [ValidateNotNullOrEmpty()]
+    [string[]]$Csv = 'prompts\prompts.csv',
     [ValidateRange(0, 100000)]
     [int]$Start = 0,
     [ValidateRange(1, 20)]
@@ -21,7 +22,7 @@ function Resolve-InputFile([string]$Path) {
     return $file.FullName
 }
 
-$csvPath = Resolve-InputFile $Csv
+$csvPaths = @(foreach ($path in $Csv) { Resolve-InputFile $path })
 $py = Join-Path $root 'venv\Scripts\python.exe'
 $names = @{}
 $references = @(foreach ($path in $RefImage) {
@@ -41,7 +42,8 @@ $references = @(foreach ($path in $RefImage) {
 
 $run = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
 $common = @(
-    (Join-Path $root 'scripts\generate_images.py'), '--prompts', $csvPath,
+    (Join-Path $root 'scripts\generate_images.py'), '--prompts'
+) + $csvPaths + @(
     '--start', "$Start", '--limit', "$Limit", '--batch', '1', '--seed', "$Seed",
     '--steps', '28', '--cfg', '5.5', '--sampler', 'dpmpp_2m', '--scheduler', 'karras',
     '--stop-on-error'

@@ -58,7 +58,79 @@ if (-not (Test-Path -LiteralPath $testCsv)) {
 .\venv\Scripts\python.exe scripts\generate_images.py --prompts $testCsv --limit 1
 ```
 
-1つ目のコマンドで生成条件を確認し、2つ目のコマンドで画像を `output\raw\` に保存する。
+1つ目のコマンドで生成条件を確認し、2つ目のコマンドで画像を `output\raw\setup_test\` に保存する。
+
+### Anima で既存 CSV を使う場合
+
+Anima Base v1.0 用の API ワークフローは `workflows/anima_base_api.json`。
+ComfyUI に Anima 対応が必要。公式モデル3点を導入するには次を実行する。
+インストーラーは公式配布元の固定リビジョンから取得し、SHA256 を検証する。
+ダウンロードは合計約5.6GB。検証済みの既存ファイルは再取得しない。
+
+```powershell
+.\venv\Scripts\python.exe scripts\install_anima.py
+```
+
+配置先は `ComfyUI/models/` 配下の次の3ファイル。
+
+- `diffusion_models/anima-base-v1.0.safetensors`
+- `text_encoders/qwen_3_06b_base.safetensors`
+- `vae/qwen_image_vae.safetensors`
+
+ComfyUI を起動し、既存 CSV を指定して生成する。次の例は冬服 CSV の先頭3行を使用する。
+CSV に保存された設定より引数を優先し、Anima 用に40ステップ、CFG 4、
+`er_sde` / `simple` を使う。人物・衣装・構図のプロンプトと解像度は CSV から読む。
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py `
+  --workflow workflows\anima_base_api.json `
+  --prompts prompts\prompts_combined_1920_v5_reference_character_winter_v3.csv `
+  --common-positive prompts\common_positive_anima.txt `
+  --common-negative prompts\common_negative_anima.txt `
+  --steps 40 --cfg 4 --sampler er_sde --scheduler simple `
+  --batch 1 --seed -1 --prefix anima `
+  --limit 3
+```
+
+全行を生成する場合は `--limit 3` を外す。投入前の確認には `--dry-run` を追加する。
+出力は従来どおり `output/raw/<CSV名>/`、実行ログは `logs/gen_*.csv`。
+このワークフローは Anima 単体で生成し、Dreamwash / anmi LoRA、
+`input/style_reference/` の IP-Adapter 画風参照、1.5倍の仕上げは適用しない。
+別の Anima 本体を導入した場合は `--ckpt <ファイル名>` で選択できる。
+SDXL のチェックポイントはこのワークフローでは指定できない。
+
+#### Anima Aesthetic で生成する
+
+画風と品質の一貫性を高めるために調整された Anima Aesthetic v1.1 も利用できる。
+次のコマンドで本体（約4.2GB）を追加する。テキストエンコーダーと VAE は Base と共用し、
+既存ファイルは SHA256 を検証して再利用する。
+
+```powershell
+.\venv\Scripts\python.exe scripts\install_anima.py --variant aesthetic
+```
+
+生成には同じワークフローを使い、`--ckpt` で Aesthetic を選択する。
+公式の Aesthetic 向け案内に合わせて、共通プロンプトには `score_*` タグを含めない。
+既存 CSV 内に `score_*` がある場合は自動削除しないため、必要に応じて CSV 側で外す。
+次の例は冬服 CSV の先頭3行を各1枚生成する。
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py `
+  --workflow workflows\anima_base_api.json `
+  --ckpt anima-aesthetic-v1.1.safetensors `
+  --prompts prompts\prompts_combined_1920_v5_reference_character_winter_v3.csv `
+  --common-positive prompts\common_positive_anima_aesthetic.txt `
+  --common-negative prompts\common_negative_anima_aesthetic.txt `
+  --steps 40 --cfg 4 --sampler er_sde --scheduler simple `
+  --batch 1 --seed -1 --prefix anima_aesthetic `
+  --limit 3
+```
+
+全行生成には `--limit 3` を外す。Base との比較には両方で同じ `--seed 42` などを指定する。
+Aesthetic でも Dreamwash / anmi、IP-Adapter 画風参照、1.5倍の仕上げは適用しない。
+
+公式情報: [Anima モデル](https://huggingface.co/circlestone-labs/Anima)・
+[ComfyUI 導入ガイド](https://docs.comfy.org/tutorials/image/anima/anima)。
 
 ### Dreamwash + anmi とスタイル参照を使う場合
 
@@ -75,10 +147,272 @@ git -C .\ComfyUI\custom_nodes\ComfyUI_IPAdapter_plus checkout --detach a0f451a51
 
 参照画像は `input\style_reference\` に置く。モデルの入手先とファイル名は [ComfyUI IPAdapter Plus の導入手順](https://github.com/cubiq/ComfyUI_IPAdapter_plus#installation) を参照。
 
+### WAI v17 と添付画像の画風参照で生成する
+
+細い色付き輪郭線、細かな髪の陰影、柔らかな肌のグラデーション、青灰色の陰影を狙う構成。
+参照用に保存した画像は `input/wai_cool_cel_reference.jpg`。
+WAI v17 と IP-Adapter の `style transfer`（強度0.30）を使い、
+`prompts/common_positive_wai_cool_cel.txt` の画風指定を CSV 各行の先頭に追加する。
+この例では Dreamwash / anmi LoRA と1.5倍の仕上げは適用しない。
+`sdxl_wai_cool_cel_api.json` は、この参照画像（904×1600）を左右348pxの白い余白で
+1600×1600に整えてから IP-Adapter に渡す。中央切り抜きによる上下の欠落を防ぐ。
+別サイズの参照を使う場合は、ワークフローの白背景サイズと画像配置座標を調整する。
+上記の IP-Adapter カスタムノード・補助モデルを用意し、ComfyUI を起動して実行する。
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py `
+  --workflow workflows\sdxl_wai_cool_cel_api.json `
+  --ckpt waiIllustriousSDXL_v170.safetensors `
+  --prompts prompts\prompts_combined_1920_v5_reference_character_winter_v3.csv `
+  --common-positive prompts\common_positive_wai_cool_cel.txt `
+  --common-negative prompts\common_negative_wai_cool_cel.txt `
+  --ref-image input\wai_cool_cel_reference.jpg `
+  --ipadapter-weight 0.30 --ipadapter-weight-type "style transfer" `
+  --steps 28 --cfg 5.5 --sampler euler_ancestral --scheduler normal `
+  --batch 1 --seed -1 --prefix wai_cool_cel `
+  --limit 3
+```
+
+このコマンドは指定した参照画像1枚だけを使用する。`input/style_reference/` の画像は混ぜない。
+CSV の人物・衣装・構図と解像度を使用し、生成設定は上記引数で上書きする。
+共通 negative には `common_negative_wai_cool_cel.txt` を使い、セル塗りや鮮やかな色を抑えない。
+CSV 各行の negative も追加されるため、画風と矛盾する指定があれば CSV 側で調整する。
+全行生成には `--limit 3` を外す。投入前の確認には `--dry-run` を追加する。
+画像は `output/raw/<CSV名>/wai_cool_cel_<実行日時>_*.png` に保存する。
+前処理した参照も同じフォルダに `wai_reference_padded_<実行日時>_*.png` として保存する。
+強度比較は同じ CSV 行と seed で行う。例えば `--prompts prompts\prompts_25.csv`
+と `--start 73 --limit 1 --seed 10641447137440873721` を指定し、
+`--ipadapter-weight` だけを `0.30`、`0.50`、`0.70` に変えて各1回実行する。
+参照画像はローカル専用の `input/` 配下にあり、Git 管理には含めない。
+
+### prompts_25.csv を WAI v17 + Chen-bin 0.80 + 画風参照0.30で量産する
+
+`models/loras/il_chenbin_try_3-000006.safetensors` を使い、トリガー語
+`artist: chen bin` を positive に追加する。IP-Adapter は保存済み参照画像を
+白い余白付き正方形にして、`style transfer`・強度0.30で適用する。
+Dreamwash と1.5倍の仕上げは使わない。ComfyUI を起動して次を実行する。
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py `
+  --workflow workflows\sdxl_lora_reference_api.json `
+  --ckpt waiIllustriousSDXL_v170.safetensors `
+  --lora il_chenbin_try_3-000006.safetensors --lora-strength 0.80 `
+  --prepend "artist: chen bin" `
+  --prompts prompts\prompts_25.csv `
+  --common-positive prompts\common_positive_wai_cool_cel.txt `
+  --common-negative prompts\common_negative_wai_cool_cel.txt `
+  --ref-image input\wai_cool_cel_reference.jpg `
+  --ipadapter-weight 0.30 --ipadapter-weight-type "style transfer" `
+  --steps 28 --cfg 5.5 --sampler euler_ancestral --scheduler normal `
+  --batch 1 --seed -1 --prefix wai_chenbin080_ip030
+```
+
+### prompts_25.csv を WAI v17 + anmi 0.80で量産する
+
+`models/loras/anmi.safetensors` を単体で適用し、トリガー語 `anmihuafeng` を
+positive に追加する。Dreamwash・IP-Adapter・1.5倍の仕上げは使わない。
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py `
+  --workflow workflows\sdxl_lora_api.json `
+  --ckpt waiIllustriousSDXL_v170.safetensors `
+  --lora anmi.safetensors --lora-strength 0.80 `
+  --prepend "anmihuafeng" `
+  --prompts prompts\prompts_25.csv `
+  --common-positive prompts\common_positive_wai_cool_cel.txt `
+  --common-negative prompts\common_negative_wai_cool_cel.txt `
+  --no-style-reference `
+  --steps 28 --cfg 5.5 --sampler euler_ancestral --scheduler normal `
+  --batch 1 --seed -1 --prefix wai_anmi080
+```
+
+どちらも CSV 全行を各1枚、行ごとにランダム seed で生成する。
+LoRA の model / clip 強度は両方0.80。画像は `output/raw/prompts_25/` に保存し、
+ファイル名の接頭辞で構成を区別する。Chen-bin 構成では前処理済み参照も保存する。
+まず少量で試すには末尾に `--limit 3`、投入前の確認には `--limit 3 --dry-run` を追加する。
+比較時と同じ行・seedを再現するには `--seed -1` を
+`--seed 10641447137440873721 --start 73 --limit 1` に置き換える。
+
+### prompts_25.csv を WAI v17 + Dreamwash 0.60 + Chen-bin 0.80 + 画風参照0.30で量産する
+
+Dreamwash と Chen-bin を併用し、両方のトリガー語 `dreamwash, artist: chen bin` を
+positive に追加する。画風参照には `input/wai_cool_cel_reference.jpg` を使い、
+白い余白付き正方形にしてから IP-Adapter の `style transfer`・強度0.30で適用する。
+ComfyUI を起動して次を実行する。
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py `
+  --workflow workflows\sdxl_dreamwash_lora_reference_api.json `
+  --ckpt waiIllustriousSDXL_v170.safetensors `
+  --lora il_chenbin_try_3-000006.safetensors --lora-strength 0.80 `
+  --prepend "dreamwash, artist: chen bin" `
+  --prompts prompts\prompts_25.csv `
+  --common-positive prompts\common_positive_wai_cool_cel.txt `
+  --common-negative prompts\common_negative_wai_cool_cel.txt `
+  --ref-image input\wai_cool_cel_reference.jpg `
+  --ipadapter-weight 0.30 --ipadapter-weight-type "style transfer" `
+  --steps 28 --cfg 5.5 --sampler euler_ancestral --scheduler normal `
+  --batch 1 --seed -1 --prefix wai_dw060_chenbin080_ip030
+```
+
+### prompts_25.csv を WAI v17 + Dreamwash 0.60 + anmi 0.80で量産する
+
+Dreamwash と anmi を併用し、両方のトリガー語 `dreamwash, anmihuafeng` を
+positive に追加する。IP-Adapter は使わない。
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py `
+  --workflow workflows\sdxl_dreamwash_lora_api.json `
+  --ckpt waiIllustriousSDXL_v170.safetensors `
+  --lora anmi.safetensors --lora-strength 0.80 `
+  --prepend "dreamwash, anmihuafeng" `
+  --prompts prompts\prompts_25.csv `
+  --common-positive prompts\common_positive_wai_cool_cel.txt `
+  --common-negative prompts\common_negative_wai_cool_cel.txt `
+  --no-style-reference `
+  --steps 28 --cfg 5.5 --sampler euler_ancestral --scheduler normal `
+  --batch 1 --seed -1 --prefix wai_dw060_anmi080
+```
+
+どちらも CSV 全行を各1枚、行ごとにランダム seed で生成し、
+`output/raw/prompts_25/` に保存する。1.5倍の仕上げは適用しない。
+Dreamwash の model / clip 強度はワークフローのノード9で0.60に固定されている。
+`--lora-strength 0.80` はノード8の Chen-bin / anmi の model / clip 強度を設定する。
+共通プロンプトと negative は比較時と同じものを使う。
+まず少量で試すには末尾に `--limit 3`、投入前の確認には `--limit 3 --dry-run` を追加する。
+比較時と同じ行・seedを再現するには `--seed -1` を
+`--seed 10641447137440873721 --start 73 --limit 1` に置き換える。
+
+### Dreamwash 併用の2構成に1.5倍の仕上げを追加する
+
+次の2構成は、最初の生成画像を Lanczos で1.5倍に拡大し、VAE で再エンコードして
+`denoise 0.25` の再サンプリングを行う。仕上げにも同じ LoRA、positive / negative、
+seed、steps、CFG、サンプラーを適用し、Chen-bin 構成では同じ画風参照0.30も適用する。
+Dreamwash は model / clip とも0.60、Chen-bin / anmi はとも0.80。
+CSV の832×1216は最終的に1248×1824になる。
+
+**WAI v17 + Dreamwash 0.60 + Chen-bin 0.80 + IP-Adapter 0.30 + 1.5倍仕上げ**
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py `
+  --workflow workflows\sdxl_dreamwash_lora_reference_hires_api.json `
+  --ckpt waiIllustriousSDXL_v170.safetensors `
+  --lora il_chenbin_try_3-000006.safetensors --lora-strength 0.80 `
+  --prepend "dreamwash, artist: chen bin" `
+  --prompts prompts\prompts_25.csv `
+  --common-positive prompts\common_positive_wai_cool_cel.txt `
+  --common-negative prompts\common_negative_wai_cool_cel.txt `
+  --ref-image input\wai_cool_cel_reference.jpg `
+  --ipadapter-weight 0.30 --ipadapter-weight-type "style transfer" `
+  --steps 28 --cfg 5.5 --sampler euler_ancestral --scheduler normal `
+  --batch 1 --seed -1 --prefix wai_dw060_chenbin080_ip030_hires
+```
+
+**WAI v17 + Dreamwash 0.60 + anmi 0.80 + 1.5倍仕上げ（画風参照なし）**
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py `
+  --workflow workflows\sdxl_dreamwash_lora_hires_api.json `
+  --ckpt waiIllustriousSDXL_v170.safetensors `
+  --lora anmi.safetensors --lora-strength 0.80 `
+  --prepend "dreamwash, anmihuafeng" `
+  --prompts prompts\prompts_25.csv `
+  --common-positive prompts\common_positive_wai_cool_cel.txt `
+  --common-negative prompts\common_negative_wai_cool_cel.txt `
+  --no-style-reference `
+  --steps 28 --cfg 5.5 --sampler euler_ancestral --scheduler normal `
+  --batch 1 --seed -1 --prefix wai_dw060_anmi080_hires
+```
+
+ComfyUI を起動して実行する。どちらも `prompts_25.csv` 全行を各1枚、ランダム seed で
+生成し、仕上げ後の画像を `output/raw/prompts_25/` に保存する。
+Chen-bin 構成では前処理済み参照画像も同じフォルダに保存する。
+まず少量で試すには末尾に `--limit 3`、投入前の確認には `--limit 3 --dry-run` を追加する。
+dry-run の size 表示と CSV ログの width / height は仕上げ前のサイズ。
+最終画像はその1.5倍となり、VAE の都合で各辺8の倍数に切り詰められる場合がある。
+仕上げ強度を変更する場合は専用ワークフローのノード25の `denoise` を編集する。
+CLI の `--denoise` は最初の生成の指定なので、仕上げ強度の調整には使わない。
+
+### prompts_26.csv の追加衣装を生成する
+
+`prompts/prompts_26.csv` は200行。今回追加したアイドル・魔法少女・ゴスロリ衣装が
+各60行（15衣装を各12行）、既存衣装が20行入っている。
+ComfyUI を起動し、別の PowerShell で次を実行する。
+普段の WAI v17 + Dreamwash + anmi 構成で、全行を各1枚、計200枚生成する。
+
+```powershell
+Set-Location F:\ai-image
+.\venv\Scripts\python.exe scripts\generate_images.py `
+  --workflow workflows\sdxl_dreamwash_anmi_api.json `
+  --prompts prompts\prompts_26.csv `
+  --common-positive prompts\common_positive_dreamwash_anmi.txt `
+  --common-negative prompts\common_negative_mixed.txt `
+  --batch 1 --seed -1 --prefix img
+```
+
+画像は `output/raw/prompts_26/` に保存する。CSV の832×1216から1.5倍仕上げを行い、
+最終サイズは1248×1824。行ごとにランダム seed を使う。
+`input/style_reference/` に画像があれば画風参照も適用する。
+先頭3行だけ試す場合は末尾に `--limit 3`、生成せず条件を確認する場合は
+`--limit 3 --dry-run` を追加する。
+同じCSVを3構成で比較する場合は、次の `generate_three_styles.py` の例を使う（全行で600枚）。
+
+### CSV 各行を同じ seed で3構成ずつ生成する
+
+`scripts/generate_three_styles.py` は1行につき次の3構成を各1枚生成する。
+既定では構成ごとに全行をまとめて処理する（表の1構成目の全行→2構成目の全行→3構成目の全行）。
+LoRA・IP-Adapter の切り替えを減らし、モデルや参照のキャッシュを再利用しやすくする。
+seed は生成前に行ごとに1つ決め、処理順にかかわらず同じ行の3構成で共用する。
+速度の改善量は ComfyUI のキャッシュ設定・GPUメモリ・他ジョブの割り込みに依存する。
+全構成に1.5倍仕上げ（Lanczos + denoise 0.25）を適用する。
+
+| 出力名の構成識別子 | 構成 | 共通プロンプト・生成設定 |
+| --- | --- | --- |
+| `dw060_chenbin080_ip030_hires` | WAI v17 + Dreamwash 0.60 + Chen-bin 0.80 + IP-Adapter 0.30 | cool_cel用positive / negative、`dreamwash, artist: chen bin`、28steps / CFG 5.5 / Euler a / normal |
+| `dw060_anmi080_hires` | WAI v17 + Dreamwash 0.60 + anmi 0.80、画風参照なし | cool_cel用positive / negative、`dreamwash, anmihuafeng`、28steps / CFG 5.5 / Euler a / normal |
+| `dw060_anmi030_original` | 既存の `sdxl_dreamwash_anmi_api.json`、画風参照なし | `common_positive_dreamwash_anmi.txt` / `common_negative_mixed.txt`、steps / CFG / sampler / schedulerはCSV優先 |
+
+3つ目は指定された既存コマンドと同じ構成で、anmiは0.30。
+各構成で `batch` はCSVの値にかかわらず1に固定する。人物プロンプト・解像度は同じCSV行から読む。
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_three_styles.py `
+  --prompts prompts\prompts_26.csv `
+  --seed -1 `
+  --face-refine --larger-eyes
+```
+
+先頭1行だけ試す場合は `--limit 1`、生成せず条件を確認する場合は
+`--limit 1 --dry-run` を追加する。`--limit` は出力枚数ではなくCSV行数なので、
+1行指定では3枚生成する。`--start 10` は先頭10行を飛ばす。
+`--seed 42` のように指定すると、全行・全構成でその固定seedを使う。
+`--prompts` は複数CSVも指定でき、省略時は `prompts/prompts_26.csv`。
+`--order profile` が既定。以前のように各行の3構成を続けて生成したい場合は
+`--order row` を追加する。生成内容・行ごとのseed共有・保存先は同じ。
+
+`--face-refine --larger-eyes` は各画像の1.5倍仕上げ後に、顔補修→目元調整の順で適用する。
+既存の `generate_images.py` と同じ補修処理を使い、その構成のLoRA・seed・画風参照設定を引き継ぐ。
+対象が小さい、または領域を特定できない補修はスキップし、直前の画像を引き継ぐ。
+補修が不要なら両フラグを外す。補修には顔検出モデルとDWPoseモデルが必要で、追加の処理時間がかかる。
+dry-runでは補修を実行せず、指定の有無だけを表示する。
+
+保存先は `output/raw/<CSV名>/three_styles/<実行日時>/`。
+参照のプレビュー画像は保存しない。各補修が成功すると、その入力画像は
+`output/raw/<CSV名>_origin/` へ、CSV名以下のディレクトリ構造を維持して移動する。
+顔補修→目元調整が両方成功した場合は元画像と顔補修後の中間画像が移動対象になる。
+補修後の画像は `faces/`、`eyes/` などの下位フォルダに保存される。
+ログの `files` が最終画像、`original_files` が1.5倍仕上げ直後の画像を示す。
+`refinements` には各補修の成功・スキップと入出力を記録する。
+ファイル名には元CSVの行番号と構成識別子が入り、同じIDが重複しても区別できる。
+`logs/three_styles_<実行日時>.csv` にseed・プロンプト・構成・画像パス・成否を
+1件完了するごとに保存する。失敗があっても既定では続行し、終了コード1を返す。
+失敗時に止めるには `--stop-on-error`。タイムアウトはキューを積み続けないよう必ず停止する
+（投入済みのComfyUIジョブはキャンセルしない）。待ち時間は `--timeout 1200` で指定できる。
+
 ## 好みの絵柄を比較する
 
 普段の WAI v17 + Dreamwash + anmi ワークフローは、`input/style_reference` 直下の
-画像を IP-Adapter の `style transfer`、強度 `0.20` で使う。
+画像を IP-Adapter の `style transfer`、強度 `0.30` で使う。
 複数枚ある場合は画像の特徴量を平均する。フォルダがない場合や画像が0枚の場合は、
 スタイル参照なしで生成する。別のフォルダは `--ref-dir "フォルダのパス"`、
 1枚だけ使う場合は `--ref-image "画像のパス"` で指定できる。
@@ -94,7 +428,7 @@ git -C .\ComfyUI\custom_nodes\ComfyUI_IPAdapter_plus checkout --detach a0f451a51
   --prompts prompts\prompts_combined_3600_v5.csv `
   --common-positive prompts\common_positive_dreamwash_anmi.txt `
   --common-negative prompts\common_negative_mixed.txt `
-  --batch 1 --seed -1 --prefix "dreamwash_anmi/$(Get-Date -Format 'yyyyMMdd_HHmmss')/img"
+  --batch 1 --seed -1 --prefix img
 ```
 
 冬服版のプロンプトで量産する場合は、ローカルの `prompts_combined_1920_v5_reference_character_winter_v3.csv` を `prompts/` に置いて実行する。
@@ -105,12 +439,130 @@ git -C .\ComfyUI\custom_nodes\ComfyUI_IPAdapter_plus checkout --detach a0f451a51
    --prompts .\prompts\prompts_combined_1920_v5_reference_character_winter_v3.csv `
    --common-positive prompts\common_positive_dreamwash_anmi.txt `
    --common-negative prompts\common_negative_mixed.txt `
-   --batch 1 --seed -1 --prefix "dreamwash_anmi/$(Get-Date -Format 'yyyyMMdd_HHmmss')/img"
+   --batch 1 --seed -1 --prefix img
 ```
 
 `generate_images.py` は画像のファイル名にコマンド実行日時を
 `YYYYMMDD_HHMMSS` 形式で付ける（例 `img_20261112_153000_00001_.png`）。
 同じ実行で生成した画像と CSV ログには同じ日時が入る。
+
+### CSV の各プロンプトで全ポーズを生成する
+
+専用コマンド `scripts/generate_poses.py` は、CSV の各行と
+`input/pose_reference/` 直下の全画像をファイル名順で組み合わせる。
+10行と5ポーズ、各組み合わせ1枚なら50枚になる。通常の生成コマンドには影響しない。
+画風は引き続き `input/style_reference/` の画像をまとめて参照する。
+既定は WAI + Dreamwash + anmi、画風参照、1.5倍の仕上げ。
+
+```powershell
+# 人物の写真・イラストを input/pose_reference/ に入れて、まず条件を確認
+.\venv\Scripts\python.exe scripts\generate_poses.py `
+  --prompts prompts\prompts.csv `
+  --common-positive prompts\common_positive_dreamwash_anmi.txt `
+  --common-negative prompts\common_negative_mixed.txt `
+  --limit 1 --batch 1 --seed 12345 --dry-run
+```
+
+`--dry-run` を外すと、起動済みの ComfyUI で生成する。dry-run はファイル書き込み・
+骨格抽出・API 通信を行わないため、骨格を検出できるかの確認は実行時になる。
+`--limit` は CSV の行数だけを制限し、ポーズは必ず全画像を使用する。
+ポーズ画像は DWPose で骨格に変換し、縦横比を保って余白を追加して生成サイズに合わせる。
+全ポーズの骨格抽出が成功してから、OpenPose ControlNet を最初の生成と仕上げの両方に適用する。
+骨格抽出は CPU で行い、生成用の GPU メモリ消費を抑える。追加のカスタムノードは不要。
+
+- 別のポーズフォルダ: `--pose-dir "フォルダ"`
+- 作成済みの OpenPose 骨格画像を直接使う: `--pose-mode openpose`（通常の手描き棒人間とは異なる）
+- ポーズ強度: `--pose-strength 0.8`、適用区間: `--pose-start 0 --pose-end 1`
+- 画風参照なし: `--no-style-reference`、別の画風フォルダ: `--ref-dir "フォルダ"`
+- 画風強度: `--ipadapter-weight 0.30`
+- 途中で失敗したら中断: `--stop-on-error`
+
+同一 CSV 行の全ポーズには同じシードを使う。`--seed -1`（既定）は行ごとにランダム、
+固定値は全行で同じシードになる。`--batch` 省略時は CSV、次にワークフローの枚数を使う。
+CSV と共通プロンプトの姿勢指定は自動削除しないため、参照と矛盾する指定は事前に外す。
+写真・人物イラストと作成済み骨格画像は、同じ実行のフォルダに混在させない。
+
+出力先は `output/raw/<CSV名>/poses/<実行日時>/`、骨格画像は
+`input/pose_maps/<実行日時>/`、ログは `logs/poses_<実行日時>.csv`。
+出力名には行番号・行ID・ポーズ番号・ポーズ名が入り、ログには参照元画像、骨格画像、
+シード、画風画像、生成条件、出力ファイル、失敗理由を記録する。
+
+### 複数のプロンプト CSV をまとめて使う
+
+`--prompts` の後にファイルを並べると、指定した順に処理する。
+`--start` と `--limit` は、全 CSV のプロンプトをつないだ行順に適用する。
+画像は元の CSV 名に対応する `output\raw\<CSV の拡張子なしファイル名>\` に保存され、
+生成ログの `source_csv` 列で各行の元ファイルを確認できる。
+
+```powershell
+.\venv\Scripts\python.exe scripts\generate_images.py --prompts '.\prompts\a.csv' '.\prompts\b.csv' --dry-run
+.\generate-quality.ps1 -Csv @('.\prompts\a.csv', '.\prompts\b.csv') -Count 1
+```
+
+`compare-style.ps1` と `generate-ipadapter.ps1` でも、同じ形式で `-Csv` に複数のパスを渡せる。
+
+### 人物・ポーズの候補を更新する
+
+候補は [`prompts/pools/`](prompts/pools/) にある。編集するカテゴリと同名の CSV を開く。
+
+人物属性のカテゴリは、目の色（`eyes`）、目の形（`eye_shapes`）、表情（`expressions`）、
+肌（`skins`）、顔（`faces`）、体型（`bodies`）、髪（`hairs`）、視線（`gazes`）。
+両スクリプトが人物属性、立ち・座り・低い姿勢（`standing`、`seated`、`low`）、腕・手の配置（`arms`）、衣装の候補を共有する。
+`1600_v4` は静的・動的ポーズの両方に構図（`compositions`）を使い、動的ポーズには動作（`motions`）、カメラ（`cameras`）、手足の配置（`limbs`）も組み合わせる。
+旧スクリプトの候補も収録している。`ages.csv` は年齢、`poses.csv` は `_rei_tmp_gen800.py` が単体で使うポーズ、
+`outfits.csv` は組み合わせ済みの衣装。
+
+カテゴリごとに1候補を1行で編集し、ヘッダーを維持して CSV UTF-8 で保存する。
+`en` はプロンプトに入る英語、`ja` は編集時に参照する日本語の説明。一部の説明は生成 CSV のメモにも入る。
+`hairs.csv` は1行に1つの組み合わせを持つ。`color_en` に髪色、`style_en` に髪型を入力する。
+たとえば `dark brown` と `short cropped hair` は `dark brown hair, short cropped hair` として生成される。
+`bottoms.csv` と `footwear.csv` も同じ列構成を使う。`style_en` には形や素材、細部を入力する。
+この3ファイルの `color_ja` と `style_ja` は色と髪型・形それぞれの日本語説明。`ja` は組み合わせ全体の説明として使う。
+`outfits.csv` では、同じ衣装セットのアイテムに同じ `outfit_id` を付け、`item_no` で順序を指定する。
+各行の `color_en` と `style_en` を編集し、色の指定がないアイテムは `color_en` を空欄にする。
+`style_en` 内の `{color_en}` は、色を語句の途中に入れる場合に使う。
+`ja` にはセット全体の日本語説明を1行に入力する。`item_ja` は各アイテムの編集時に参照する日本語説明。
+`_rei_tmp_gen800.py` はセット全体の `ja` を生成 CSV のメモに使う。
+`palettes` の `en` は配色、`accessory_en` は衣装に付随するアクセサリー。
+`color_ja` と `accessory_ja` はそれぞれの日本語説明で、生成 CSV のメモには組み合わせ全体の `ja` を使う。
+`compositions` は画面内の人物の位置、余白、前景や背景の配置を指定する。
+`cameras` は視点の高さや角度、レンズの遠近感、ピントの範囲を指定する。
+両方の `allow_upper_body` は、上半身と全身に使う候補を `yes`、全身専用の候補を `no` にする。
+`limbs` も `allow_upper_body` で同様に指定する。脚・足を見せる配置は `no` にして全身に使う。
+`outfit_archetypes` の `add_bottom` を `yes` にした衣装にはボトムスを足す。
+同じカテゴリで同じ `en` の候補は1行にまとめる。髪・ボトムス・靴は `color_en` と `style_en`、`palettes` は配色とアクセサリーの組み合わせで重複を判定する。
+カテゴリ内の行順は組み合わせに影響する。
+
+リポジトリ直下でコマンドを実行すると、`prompts_combined_1600_v4.csv` と
+`prompts_upperbody_combined_800_400pool.csv` をそれぞれ上書きする。
+
+```powershell
+.\venv\Scripts\python.exe .\_rei_tmp_gen1600_v4.py
+.\venv\Scripts\python.exe .\_rei_tmp_gen400pool.py
+```
+
+抽象背景を使う場合は `--abstract-backgrounds` を付ける。
+[`abstract_backgrounds.csv`](prompts/pools/abstract_backgrounds.csv) の候補を上から順に巡回し、
+`en` を各行のポジティブプロンプト、`ja` をメモに追加する。
+出力ファイル名の末尾には `_abstract` が付く。
+`outfits.csv` の衣装セットと組み合わせる場合は `_rei_tmp_gen800.py` を使う。
+
+```powershell
+.\venv\Scripts\python.exe .\_rei_tmp_gen1600_v4.py --abstract-backgrounds
+.\venv\Scripts\python.exe .\_rei_tmp_gen400pool.py --abstract-backgrounds
+.\venv\Scripts\python.exe .\_rei_tmp_gen800.py --abstract-backgrounds
+```
+
+### 生成した画像の顔を補修する
+
+顔全体を補修するには、上の量産コマンドに `--face-refine`（別名 `--refine-face`）を追加する。
+顔の輪郭と元画像の色からマスクを作り、denoise `0.45` で再生成する。
+両目の位置を十分な確度で検出できた場合は、元画像の目を少し広げた下絵を使う。
+補修版は同じ出力フォルダ内の `faces` に保存する。`--face-refine` / `--larger-eyes` の
+各補修が成功した場合に、その入力PNGを `output/raw/<CSV名>_origin/` へ移動する。
+たとえば `output/raw/example/sub/image.png` は `output/raw/example_origin/sub/image.png` になる。
+スキップ・生成失敗時は移動せず、移動先に同名ファイルがある場合は上書きせずエラーにする。
+顔やマスクを特定できない画像は元PNGを結果に使う。
 
 ```powershell
 # 参照画像・プロンプト・生成条件を確認する（生成なし）
@@ -122,7 +574,7 @@ git -C .\ComfyUI\custom_nodes\ComfyUI_IPAdapter_plus checkout --detach a0f451a51
 WAI v17 で、同じプロンプト・シードを使って参照なし（`base`）、
 IP-Adapter の絵柄参照 0.35（`ref_035`）、0.60（`ref_060`）を比較する。
 既定は3プロンプトで計9枚。`-Csv` と `-Start` で比較対象を変えられる。
-出力先は `output\raw\style_compare\<実行日時>\`。
+出力先は `output\raw\<CSV の拡張子なしファイル名>\style_compare\<実行日時>\`。
 同じプロンプト同士を見比べ、線・塗り・色が好みに近づいたかと、
 顔や構図が参照に引っ張られすぎていないかを確認する。
 
@@ -366,7 +818,7 @@ cd F:\ai-image
 .\venv\Scripts\python.exe scripts\generate_images.py --start 100 --limit 100 --batch 2
 ```
 
-出力は `output\raw\gen\` 配下（`SaveImage` の `filename_prefix` が `gen/img`）。
+画像は `output\raw\<CSV の拡張子なしファイル名>\` に保存する。たとえば `prompts.csv` の出力先は `output\raw\prompts\`。
 実行内容は `logs\gen_YYYYMMDD_HHMMSS.csv` に「プロンプト・シード・出力ファイル・所要時間・成否」で残る。
 
 #### ファイル構成
@@ -436,7 +888,7 @@ cd F:\ai-image
 | `--sampler` / `--scheduler` | 空 | 上書き |
 | `--width` / `--height` | 0 | 上書き |
 | `--ckpt` | 空 | チェックポイント名を上書き |
-| `--prefix` | 空 | `filename_prefix` を上書き。ファイル名の接頭辞には実行日時が付く |
+| `--prefix` | 空 | CSV 名のフォルダ内で使う保存先とファイル名の接頭辞を指定する。`比較/img` なら `比較` サブフォルダに保存し、`img` に実行日時が付く |
 | `--workflow` | `workflows\sdxl_base_api.json` | 使用するワークフロー JSON |
 | `--lora` | 空 | LoRA 名を上書き（`workflows\sdxl_lora_api.json` が必要） |
 | `--lora-strength` | -1.0 | LoRA の `strength_model` / `strength_clip` を上書き |
@@ -744,6 +1196,20 @@ negatives 形式: {'PNG': 184}  主なサイズ: [((832, 1216), 183), ((1024, 15
 3. 目標サイズへ縮小して `output\upscaled` へ
 
 アップスケール込みだと 1 枚 20MB 超になる。1000 枚で 20GB 程度を見込む。
+
+#### 裸足のつま先を補修
+
+ComfyUI を起動し、裸足のつま先が見える生成 PNG を指定する。
+
+```powershell
+.\venv\Scripts\python.exe scripts\refine_feet.py "output\raw\生成フォルダ\画像.png" --candidates 3
+```
+
+DWPose で足先を検出し、つま先の周囲を部分インペイントする。候補は元画像と
+同じフォルダ内の `feet` に別ファイルで保存する。検出の信頼度が低い足や、
+つま先の幅が小さい足はスキップする。裸足かどうかと、補修後の指の本数や
+輪郭は目視で確認する。PNG に生成情報がない場合は `--workflow` で
+元の API ワークフローを指定する。
 
 ### 5. 夜間バッチ
 

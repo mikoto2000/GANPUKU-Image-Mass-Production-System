@@ -1,8 +1,8 @@
 """
 generate_images.py — ComfyUI /prompt API による量産生成
 
-prompts\\prompts.csv の各行をワークフローへ流し込み、ComfyUI に順次投入する。
-生成結果は output\\raw 配下（SaveImage の filename_prefix に従う）へ保存され、
+指定した CSV の各行をワークフローへ流し込み、ComfyUI に順次投入する。
+生成結果は output\\raw\\<プロンプト CSV の拡張子なしファイル名> 配下へ保存され、
 実行内容は logs\\gen_YYYYMMDD_HHMMSS.csv に記録される。
 
 使い方:
@@ -121,6 +121,7 @@ class GenRecord:
     ipadapter_weight: float = 0.0
     ipadapter_weight_type: str = ""
     ref_image: str = ""
+    source_csv: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +314,8 @@ def build_workflow(
     if overrides.get("batch") and not is_img2img:
         latent["batch_size"] = overrides["batch"]
     if overrides.get("ckpt"):
-        node(NODE_CKPT)["ckpt_name"] = overrides["ckpt"]
+        model_key = "unet_name" if wf[NODE_CKPT]["class_type"] == "UNETLoader" else "ckpt_name"
+        node(NODE_CKPT)[model_key] = overrides["ckpt"]
     if overrides.get("prefix"):
         node(NODE_SAVE)["filename_prefix"] = overrides["prefix"]
     if overrides.get("denoise", -1.0) >= 0.0:
@@ -654,8 +656,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="ComfyUI による量産生成")
     ap.add_argument("--server", default=DEFAULT_SERVER, help="ComfyUI の URL")
     ap.add_argument("--workflow", default=str(WORKFLOW_PATH), help="API 形式ワークフロー JSON")
-    ap.add_argument("--prompts", default=str(PROMPTS_PATH), help="プロンプト CSV")
-    ap.add_argument("--start", type=int, default=0, help="先頭 N 行を飛ばす（0=先頭から）")
+    ap.add_argument("--prompts", type=Path, nargs="+", action="extend",
+                    help="プロンプト CSV（複数指定可。省略時は prompts/prompts.csv）")
+    ap.add_argument("--start", type=int, default=0, help="全 CSV を指定順につないだ先頭 N 行を飛ばす")
     ap.add_argument("--limit", type=int, default=0, help="--start の位置から N 行だけ処理 (0=全部)")
     ap.add_argument("--batch", type=int, default=0, help="1 プロンプトあたりの枚数（CSV より優先）")
     ap.add_argument("--steps", type=int, default=0, help="steps を上書き")
@@ -664,8 +667,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--scheduler", default="", help="スケジューラを上書き")
     ap.add_argument("--width", type=int, default=0, help="幅を上書き")
     ap.add_argument("--height", type=int, default=0, help="高さを上書き")
-    ap.add_argument("--ckpt", default="", help="チェックポイント名を上書き")
-    ap.add_argument("--prefix", default="", help="SaveImage の filename_prefix を上書き（末尾に実行日時を追加）")
+    ap.add_argument("--ckpt", default="", help="モデル名を上書き（CheckpointLoaderSimple / UNETLoader）")
+    ap.add_argument("--prefix", default="", help="CSV 名のフォルダ内で使う保存先とファイル名の接頭辞（末尾に実行日時を追加）")
     ap.add_argument("--lora", default="", help="LoRA 名を上書き（例: rei_style_v2.safetensors）")
     ap.add_argument("--lora-strength", type=float, default=-1.0, help="LoRA の strength_model/clip を上書き")
     ap.add_argument("--prepend", default="", help="positive の先頭に付ける文字列（トリガーワード等）")
@@ -686,15 +689,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ipadapter-start", type=float, default=-1.0, help="IP-Adapter の start_at")
     ap.add_argument("--ipadapter-end", type=float, default=-1.0, help="IP-Adapter の end_at")
     ap.add_argument("--seed", type=int, default=-1, help="固定シード (-1=毎回ランダム)")
+    ap.add_argument("--larger-eyes", action="store_true",
+                    help="生成後に両目を検出し、肌色を引き継いで目元を補修（ローカル ComfyUI）")
+    ap.add_argument("--face-refine", "--refine-face", action="store_true",
+                    help="生成後に顔を検出し、髪と肌色を保護して denoise 0.45 で補修（ローカル ComfyUI）")
     ap.add_argument("--dry-run", action="store_true", help="POST せず組み立てた JSON を表示")
     ap.add_argument("--timeout", type=float, default=900.0, help="1 生成あたりの待ち時間（秒）")
     ap.add_argument("--poll", type=float, default=0.2, help="ポーリング間隔（秒）")
     ap.add_argument("--stop-on-error", action="store_true", help="1 件失敗したら中断する")
     args = ap.parse_args(argv)
+    prompts_paths = args.prompts or [PROMPTS_PATH]
 
     try:
         base = load_workflow(Path(args.workflow))
-        rows = load_prompts(Path(args.prompts))
+        rows = [(path, row) for path in prompts_paths for row in load_prompts(path)]
     except Exception as e:
         print("入力の読み込みに失敗: " + repr(e))
         return 2
@@ -715,7 +723,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit > 0:
         rows = rows[: args.limit]
     if not rows:
-        print("プロンプトが 0 件: " + str(args.prompts))
+        print("プロンプトが 0 件: " + ", ".join(map(str, prompts_paths)))
         return 0
 
     try:
@@ -730,14 +738,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"スタイル参照の設定に失敗: {exc}")
         return 2
 
-    output_prefixes = []
+    output_prefixes = {}
     for node_id, save_node in base.items():
         if save_node.get("class_type") != "SaveImage":
             continue
         inputs = save_node["inputs"]
-        prefix = args.prefix if node_id == NODE_SAVE and args.prefix else inputs.get("filename_prefix", "ComfyUI")
-        inputs["filename_prefix"] = prefix.rstrip("/\\") + "_" + stamp
-        output_prefixes.append(inputs["filename_prefix"])
+        prefix = Path(inputs.get("filename_prefix", "ComfyUI")).name
+        if node_id == NODE_SAVE and args.prefix:
+            prefix = args.prefix.rstrip("/\\")
+        output_prefixes[node_id] = f"{prefix}_{stamp}"
 
     overrides = {
         "steps": args.steps,
@@ -785,16 +794,28 @@ def main(argv: list[str] | None = None) -> int:
         print("共通ネガティブ: " + str(args.common_negative)
               + " (" + str(len(common_negative.split(","))) + " タグ)")
 
-    # --- dry-run: 組み立てだけ ---
-    if args.dry_run:
-        for prefix in output_prefixes:
-            print("出力ファイル名の接頭辞: " + prefix)
-        for row in rows:
+    def iter_workflows():
+        for path, row in rows:
             seed = args.seed if args.seed >= 0 else random.randint(0, SEED_MAX)
             wf = build_workflow(base, row, seed, overrides)
+            for node_id, prefix in output_prefixes.items():
+                wf[node_id]["inputs"]["filename_prefix"] = f"{path.stem}/{prefix}"
+            yield path, row, seed, wf
+
+    # --- dry-run: 組み立てだけ ---
+    if args.dry_run:
+        if args.face_refine:
+            print("顔補修: 顔のマスクを自動作成（denoise 0.45）")
+        if args.larger_eyes:
+            print("目元補修: 両目を検出してマスクを作成（denoise 0.45–0.60）")
+        for stem in dict.fromkeys(path.stem for path, _ in rows):
+            for prefix in output_prefixes.values():
+                print(f"出力ファイル名の接頭辞: {stem}/{prefix}")
+        for path, row, seed, wf in iter_workflows():
             eff = effective_values(wf, reference_names)
             print("")
-            print("--- id=" + row.id + " seed=" + str(seed) + " ---")
+            source = f" csv={path}" if len(prompts_paths) > 1 else ""
+            print("--- id=" + row.id + " seed=" + str(seed) + source + " ---")
             print("positive: " + str(wf[NODE_POS]["inputs"]["text"]))
             print("negative: " + str(wf[NODE_NEG]["inputs"]["text"]))
             if NODE_LORA in wf:
@@ -831,6 +852,20 @@ def main(argv: list[str] | None = None) -> int:
     if not ok:
         return 3
 
+    refiners = []
+    try:
+        if args.face_refine:
+            from refine_faces import FaceRefiner
+
+            refiners.append((FaceRefiner(ROOT, INPUT_DIR, RAW_DIR), "顔補修"))
+        if args.larger_eyes:
+            from refine_eyes import EyeRefiner
+
+            refiners.append((EyeRefiner(ROOT, INPUT_DIR, RAW_DIR), "目元補修"))
+    except (ImportError, OSError) as exc:
+        print(f"補修の初期化に失敗: {exc}")
+        return 2
+
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = LOG_DIR / ("gen_" + stamp + ".csv")
@@ -838,9 +873,7 @@ def main(argv: list[str] | None = None) -> int:
     records: list[GenRecord] = []
     failures = 0
 
-    for i, row in enumerate(rows, 1):
-        seed = args.seed if args.seed >= 0 else random.randint(0, SEED_MAX)
-        wf = build_workflow(base, row, seed, overrides)
+    for i, (path, row, seed, wf) in enumerate(iter_workflows(), 1):
         eff = effective_values(wf, reference_names)
 
         rec = GenRecord(
@@ -861,6 +894,7 @@ def main(argv: list[str] | None = None) -> int:
             ipadapter_weight=float(eff.get("ipadapter_weight") or 0.0),
             ipadapter_weight_type=str(eff.get("ipadapter_weight_type") or ""),
             ref_image=str(eff.get("ref_image") or ""),
+            source_csv=str(path),
         )
 
         t0 = time.time()
@@ -868,7 +902,16 @@ def main(argv: list[str] | None = None) -> int:
             pid = client.queue_prompt(wf)
             rec.prompt_id = pid
             entry = client.wait(pid, poll=args.poll, timeout=args.timeout)
-            rec.files = "|".join(client.output_files(entry))
+            files = client.output_files(entry)
+            rec.files = "|".join(files)
+            for refiner, label in refiners:
+                for index, filename in enumerate(files):
+                    refined = refiner.refine(client, wf, filename, args.poll, args.timeout)
+                    if refined is None:
+                        print(f"  {label}スキップ（対象が小さいか、領域を特定できない）: {filename}")
+                        continue
+                    files[index] = refined
+                    rec.files = "|".join(files)
             rec.status = "OK"
         except Exception as e:
             rec.status = "FAIL"
@@ -895,7 +938,7 @@ def main(argv: list[str] | None = None) -> int:
         "prompt_id", "row_id", "positive", "negative", "seed",
         "width", "height", "steps", "cfg", "sampler", "scheduler",
         "batch", "denoise", "image", "files", "seconds", "status", "error",
-        "ipadapter_weight", "ipadapter_weight_type", "ref_image",
+        "ipadapter_weight", "ipadapter_weight_type", "ref_image", "source_csv",
     ]
     with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)

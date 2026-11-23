@@ -17,8 +17,7 @@
 # Python caches and temporary scripts
 __pycache__/
 *.pyc
-/_rei_tmp_*
-/_probe_csv_check.py
+_*
 
 # Prompt backups
 /prompts/*.bak*

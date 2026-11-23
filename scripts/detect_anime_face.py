@@ -1,5 +1,6 @@
 """Anime-specific YOLO face detection using ONNX Runtime (no OpenCV dependency)."""
 import json
+from functools import lru_cache
 from pathlib import Path
 import sys
 
@@ -9,19 +10,23 @@ from PIL import Image
 import onnxruntime as ort
 
 
-def detect(path):
+@lru_cache(maxsize=1)
+def load_session():
     model=ROOT/'models/face/face_detect_v1.4_n/model.onnx'
     if not model.exists():
         from huggingface_hub import hf_hub_download
         hf_hub_download('deepghs/anime_face_detection','face_detect_v1.4_n/model.onnx',local_dir=ROOT/'models/face')
     opts=ort.SessionOptions();opts.intra_op_num_threads=4
-    session=ort.InferenceSession(str(model),sess_options=opts,providers=['CPUExecutionProvider'])
-    with Image.open(path) as im:
-        im=im.convert('RGB');w,h=im.size
-        scale=640/max(w,h);nw,nh=round(w*scale),round(h*scale)
-        dx,dy=(640-nw)//2,(640-nh)//2
-        canvas=Image.new('RGB',(640,640),(114,114,114))
-        canvas.paste(im.resize((nw,nh),Image.Resampling.BILINEAR),(dx,dy))
+    return ort.InferenceSession(str(model),sess_options=opts,providers=['CPUExecutionProvider'])
+
+
+def detect_image(im):
+    session=load_session()
+    im=im.convert('RGB');w,h=im.size
+    scale=640/max(w,h);nw,nh=round(w*scale),round(h*scale)
+    dx,dy=(640-nw)//2,(640-nh)//2
+    canvas=Image.new('RGB',(640,640),(114,114,114))
+    canvas.paste(im.resize((nw,nh),Image.Resampling.BILINEAR),(dx,dy))
     x=np.asarray(canvas,dtype=np.float32).transpose(2,0,1)[None]/255
     pred=session.run(None,{'images':x})[0][0].T
     if pred.shape[1]!=5:raise ValueError('Unexpected YOLO output shape')
@@ -39,6 +44,11 @@ def detect(path):
             if inter/(area+other_area-inter)>0.5:duplicate=True;break
         if not duplicate:boxes.append(box)
     return [[round(b[0]),round(b[1]),round(b[2]-b[0]),round(b[3]-b[1])] for b in boxes]
+
+
+def detect(path):
+    with Image.open(path) as image:
+        return detect_image(image)
 
 if __name__=='__main__':
     print(json.dumps(detect(sys.argv[1])))

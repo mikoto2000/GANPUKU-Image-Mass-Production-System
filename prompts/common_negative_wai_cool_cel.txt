@@ -1,0 +1,8 @@
+bad quality, worst quality, worst detail, sketch,
+jpeg artifacts, signature, watermark, username, text, logo,
+blurry, lowres, bad anatomy, bad hands, extra digits, fewer digits, missing fingers,
+photorealistic, photo, 3d, cgi, render,
+oil painting, impasto, watercolor painting,
+thick lineart, bold outlines, rough lineart, messy lineart,
+heavy black shadows, monochrome, greyscale, sepia,
+decorative frame, border
